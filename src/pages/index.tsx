@@ -1,11 +1,12 @@
 import { GetStaticProps } from 'next';
 
-import { getPrismicClient } from '../services/prismic';
 import Prismic from '@prismicio/client';
 import Link from 'next/link';
+import { ReactElement, useState } from 'react';
 import { FiUser, FiCalendar } from 'react-icons/fi';
 import { format } from 'date-fns';
 import brLocale from 'date-fns/locale/pt-BR';
+import { getPrismicClient } from '../services/prismic';
 
 import commonStyles from '../styles/common.module.scss';
 import styles from './home.module.scss';
@@ -27,11 +28,35 @@ interface PostPagination {
 
 interface HomeProps {
   postsPagination?: PostPagination;
-  posts: Post[];
 }
 
-export default function Home({ posts }: HomeProps) {
-  const maisPosts = posts.length > 2;
+export default function Home({ postsPagination }: HomeProps): ReactElement {
+  const [posts, setPosts] = useState(postsPagination.results);
+  const [next_page, setNextPage] = useState(postsPagination.next_page);
+
+  async function loadMorePosts(): Promise<void> {
+    if (next_page === null) return;
+
+    await fetch(next_page)
+      .then(response => response.json())
+      .then(data => {
+        const newPosts = data.results.map(post => {
+          return {
+            uid: post.uid,
+            first_publication_date: post.first_publication_date,
+            data: {
+              title: post.data.title,
+              subtitle: post.data.subtitle,
+              author: post.data.author,
+            },
+          };
+        });
+
+        setPosts([...posts, ...newPosts]);
+        setNextPage(data.next_page);
+      });
+  }
+
   return (
     <div className={styles.home}>
       <div>
@@ -41,13 +66,19 @@ export default function Home({ posts }: HomeProps) {
 
         {posts.map(post => (
           <Link href={`post/${post.uid}`} key={post.uid}>
-            <div className={commonStyles.postBox} >
+            <div className={commonStyles.postBox}>
               <h1>{post.data.title}</h1>
               <p>{post.data.subtitle}</p>
               <div className={styles.dateAuthorBox}>
                 <div className={styles.iconsBox}>
                   <FiCalendar className={styles.icons} />
-                  <span>{post.first_publication_date}</span>
+                  <span>
+                    {format(
+                      new Date(post.first_publication_date),
+                      'dd MMM yyyy',
+                      { locale: brLocale }
+                    )}
+                  </span>
                 </div>
 
                 <div className={styles.iconsBox}>
@@ -59,8 +90,12 @@ export default function Home({ posts }: HomeProps) {
           </Link>
         ))}
 
-        {maisPosts && (
-          <button className={styles.maisPosts}>
+        {next_page && (
+          <button
+            type="button"
+            className={styles.maisPosts}
+            onClick={loadMorePosts}
+          >
             <p>Carregar mais posts</p>
           </button>
         )}
@@ -69,14 +104,14 @@ export default function Home({ posts }: HomeProps) {
   );
 }
 
-export const getStaticProps = async () => {
+export const getStaticProps: GetStaticProps<HomeProps> = async () => {
   const prismic = getPrismicClient();
 
   const postsResponse = await prismic.query(
     [Prismic.predicates.at('document.type', 'blog')],
     {
       fetch: ['blog.title', 'blog.subtitle', 'blog.content', 'blog.author'],
-      pageSize: 3,
+      pageSize: 2,
     }
   );
 
@@ -86,17 +121,20 @@ export const getStaticProps = async () => {
       data: {
         title: post.data.title,
         author: post.data.author,
-        subtitle: post.data.subtitle
+        subtitle: post.data.subtitle,
       },
-      first_publication_date: format(new Date(post.last_publication_date), 'dd MMM yyyy', {
-        locale: brLocale,
-      }),
+      first_publication_date: post.first_publication_date,
     };
   });
 
+  const { next_page } = postsResponse;
+
   return {
     props: {
-      posts,
+      postsPagination: {
+        next_page,
+        results: posts,
+      },
     },
   };
 };

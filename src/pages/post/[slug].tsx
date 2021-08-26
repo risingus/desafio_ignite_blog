@@ -1,12 +1,14 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable react/no-danger */
 import { GetStaticPaths, GetStaticProps } from 'next';
 import { RichText } from 'prismic-dom';
 import { FiUser, FiCalendar, FiClock } from 'react-icons/fi';
 import Prismic from '@prismicio/client';
+import { useRouter } from 'next/router';
 
 import { format } from 'date-fns';
 import brLocale from 'date-fns/locale/pt-BR';
-import { ReactElement } from 'react';
+import { Fragment, ReactElement } from 'react';
 import { getPrismicClient } from '../../services/prismic';
 
 import Header from '../../components/Header';
@@ -15,7 +17,6 @@ import styles from './post.module.scss';
 
 interface Post {
   first_publication_date: string | null;
-  teste: any;
   data: {
     title: string;
     banner: {
@@ -36,21 +37,40 @@ interface PostProps {
 }
 
 export default function Post({ post }: PostProps): ReactElement {
-  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-  const timeToRead = () => {
-    const { teste } = post.data;
-    const wordPerMinute = 220;
+  const router = useRouter();
 
-    const allWords = teste.reduce((allWord, word) => {
-      return String(allWord + word.text);
+  if (router.isFallback) {
+    return <div>Carregando...</div>;
+  }
+
+  const formatDate = (date): string => {
+    const formatedDate = format(new Date(date), 'dd MMM yyy', {
+      locale: brLocale,
     });
-
-    const words = allWords.split(' ').lenght;
-
-    console.log(words);
+    return formatedDate;
   };
 
-  timeToRead();
+  const timeToRead = (): string => {
+    const wordPerMinute = 200;
+
+    const wordsOfBody = (RichText.asText(
+      post.data.content.reduce((acc, data) => [...acc, ...data.body], [])
+    )).split(' ').length;
+
+    const wordsOfHeading = post.data.content.reduce((acc, data) => {
+      if (data.heading) {
+        return [...acc, ...data.heading.split(' ')];
+      }
+
+      return [...acc];
+    }, []).length;
+
+    const readingTime = Math.ceil(
+      (wordsOfHeading + wordsOfBody) / wordPerMinute
+    );
+
+    return `${readingTime}`;
+  };
 
   return (
     <div className={styles.post}>
@@ -67,7 +87,7 @@ export default function Post({ post }: PostProps): ReactElement {
         <div className={styles.iconsBox}>
           <div className={styles.iconBox}>
             <FiCalendar className={styles.icons} />
-            <p>{post.first_publication_date}</p>
+            <p>{formatDate(post.first_publication_date)}</p>
           </div>
 
           <div className={styles.iconBox}>
@@ -77,30 +97,42 @@ export default function Post({ post }: PostProps): ReactElement {
 
           <div className={styles.iconBox}>
             <FiClock className={styles.icons} />
-            <p>4 min</p>
+            <span>{`${timeToRead()} min`}</span>
           </div>
         </div>
-        <div
-          dangerouslySetInnerHTML={{ __html: post.data.content.body.text }}
-          className={styles.postContent}
-        />
+
+        {post.data.content.map(content => (
+          <Fragment key={content.heading}>
+            <h2 className={styles.heading}>{content.heading}</h2>
+            <div
+              dangerouslySetInnerHTML={{
+                __html: RichText.asHtml(content.body),
+              }}
+              className={styles.postContent}
+            />
+          </Fragment>
+        ))}
       </div>
     </div>
   );
 }
 
 export const getStaticPaths: GetStaticPaths = async () => {
-  // const prismic = getPrismicClient();
-  // const posts = await prismic.query(
-  //   [Prismic.predicates.at('document.type', 'blog')],
-  //   {
-  //     fetch: ['blog.title', 'blog.subtitle', 'blog.content', 'blog.author'],
-  //   }
-  // );
+  const prismic = getPrismicClient();
+  const posts = await prismic.query(
+    [Prismic.predicates.at('document.type', 'blog')],
+    {
+      fetch: ['blog.title', 'blog.subtitle', 'blog.content', 'blog.author'],
+    }
+  );
+
+  const paths = posts.results.map(obj => {
+    return { params: { slug: obj.uid } };
+  });
 
   return {
-    paths: [],
-    fallback: 'blocking',
+    paths,
+    fallback: true,
   };
 };
 
@@ -109,33 +141,9 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   const prismic = getPrismicClient();
   const response = await prismic.getByUID('blog', String(slug), {});
 
-  const post = {
-    first_publication_date: format(
-      new Date(response.last_publication_date),
-      'dd MMM yyyy',
-      {
-        locale: brLocale,
-      }
-    ),
-    data: {
-      title: response.data.title,
-      banner: {
-        url: String(response.data.banner.url),
-      },
-      teste: response.data.content[0].body,
-      author: response.data.author,
-      content: {
-        heading: response.data.content[0].heading,
-        body: {
-          text: RichText.asHtml(response.data.content[0].body),
-        },
-      },
-    },
-  };
-
   return {
     props: {
-      post,
+      post: response,
     },
   };
 };
